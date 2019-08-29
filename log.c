@@ -29,6 +29,13 @@
 //   ...
 // Log appends are synchronous.
 
+// 该模块主要是维护文件系统的一致性。
+// 引入log模块后，对于上层文件系统的全部磁盘操作都被切分为transaction，
+// 每个transaction都会首先将数据和其对应磁盘号写入磁盘上的log区域，
+// 且只有在log区域写入成功后，才将log区域的数据写入真正存储的数据块。
+// 因此，如果在写log的时候宕机，重启后文件系统视为该log区的写入不存在，
+// 如果从log区写到真实区域的时候宕机，则可根据log区域的数据恢复。
+
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
 struct logheader {

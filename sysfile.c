@@ -4,6 +4,9 @@
 // user code, and calls into file.c and fs.c.
 //
 
+// 主要定义了与文件相关的系统调用。由于我们不相信使用者的代码和对file.c和fs.c
+// 的调用，这里多数是进行必要的参数检查
+
 #include "types.h"
 #include "defs.h"
 #include "param.h"
@@ -18,6 +21,8 @@
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
+// 获取第n个字大小的系统调用参数作为文件描述符
+// 并返回描述符和相应的struct文件。
 static int
 argfd(int n, int *pfd, struct file **pf)
 {
@@ -37,6 +42,7 @@ argfd(int n, int *pfd, struct file **pf)
 
 // Allocate a file descriptor for the given file.
 // Takes over file reference from caller on success.
+// 为给定文件分配文件描述符，成功时从调用者获取文件引用。
 static int
 fdalloc(struct file *f)
 {
@@ -62,10 +68,11 @@ sys_dup(void)
     return -1;
   if((fd=fdalloc(f)) < 0)
     return -1;
-  filedup(f);
+  filedup(f); // 增加文件f的引用次数
   return fd;
 }
 
+// 检查参数无误后读取文件数据
 int
 sys_read(void)
 {
@@ -78,6 +85,7 @@ sys_read(void)
   return fileread(f, p, n);
 }
 
+// 检查参数无误后写入文件数据
 int
 sys_write(void)
 {
@@ -90,6 +98,7 @@ sys_write(void)
   return filewrite(f, p, n);
 }
 
+// 检查参数无误后释放文件资源
 int
 sys_close(void)
 {
@@ -103,6 +112,7 @@ sys_close(void)
   return 0;
 }
 
+// 检查参数无误后返回文件元数据
 int
 sys_fstat(void)
 {
@@ -115,6 +125,7 @@ sys_fstat(void)
 }
 
 // Create the path new as a link to the same inode as old.
+// 为已有的i节点创建新的连接
 int
 sys_link(void)
 {
@@ -124,13 +135,13 @@ sys_link(void)
   if(argstr(0, &old) < 0 || argstr(1, &new) < 0)
     return -1;
 
-  begin_op();
+  begin_op(); // log
   if((ip = namei(old)) == 0){
     end_op();
     return -1;
   }
 
-  ilock(ip);
+  ilock(ip); // 给该i节点加锁
   if(ip->type == T_DIR){
     iunlockput(ip);
     end_op();
@@ -141,9 +152,11 @@ sys_link(void)
   iupdate(ip);
   iunlock(ip);
 
+// new 的上级目录必须和已有 old 的 i 节点在同一个设备上；
   if((dp = nameiparent(new, name)) == 0)
     goto bad;
   ilock(dp);
+// i 节点号在同一个磁盘上才有意义。
   if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){
     iunlockput(dp);
     goto bad;
@@ -155,6 +168,7 @@ sys_link(void)
 
   return 0;
 
+// 如果错误发生了，sys_link必须回溯并且还原引用计数。
 bad:
   ilock(ip);
   ip->nlink--;
@@ -165,6 +179,7 @@ bad:
 }
 
 // Is the directory dp empty except for "." and ".." ?
+// 判断目录是否为空
 static int
 isdirempty(struct inode *dp)
 {
@@ -181,6 +196,7 @@ isdirempty(struct inode *dp)
 }
 
 //PAGEBREAK!
+// 解除i节点的某个连接，若连接全部移除，inode将被释放
 int
 sys_unlink(void)
 {
@@ -200,14 +216,16 @@ sys_unlink(void)
 
   ilock(dp);
 
-  // Cannot unlink "." or "..".
+  // Cannot unlink "." or "..". 不能解除以下两个名字的连接
   if(namecmp(name, ".") == 0 || namecmp(name, "..") == 0)
     goto bad;
 
+  // 同名文件不存在，无法解除链接
   if((ip = dirlookup(dp, name, &off)) == 0)
     goto bad;
   ilock(ip);
 
+  // 连接数小于1，引发内核错误
   if(ip->nlink < 1)
     panic("unlink: nlink < 1");
   if(ip->type == T_DIR && !isdirempty(ip)){
@@ -218,6 +236,7 @@ sys_unlink(void)
   memset(&de, 0, sizeof(de));
   if(writei(dp, (char*)&de, off, sizeof(de)) != sizeof(de))
     panic("unlink: writei");
+  // 更新父目录
   if(ip->type == T_DIR){
     dp->nlink--;
     iupdate(dp);
@@ -232,12 +251,14 @@ sys_unlink(void)
 
   return 0;
 
+// 解除连接失败
 bad:
   iunlockput(dp);
   end_op();
   return -1;
 }
 
+// 创建新的i节点
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
@@ -245,19 +266,26 @@ create(char *path, short type, short major, short minor)
   struct inode *ip, *dp;
   char name[DIRSIZ];
 
+  //获取上级目录的i节点 
   if((dp = nameiparent(path, name)) == 0)
     return 0;
   ilock(dp);
 
+  // 检查同名文件是否已经存在
   if((ip = dirlookup(dp, name, &off)) != 0){
     iunlockput(dp);
     ilock(ip);
+    // 如果是系统调用为open，即type==T_FILE，
+    // 则调用的 create 并且按指定文件名找到的文件是一个普通文件
+    // 那么就认为打开成功，因此 create 中也认为是成功
     if(type == T_FILE && ip->type == T_FILE)
       return ip;
+    // 否则认为出错
     iunlockput(ip);
     return 0;
   }
 
+  // 文件名不存在，分配一个新的 i 节点
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
 
@@ -267,6 +295,7 @@ create(char *path, short type, short major, short minor)
   ip->nlink = 1;
   iupdate(ip);
 
+  // 如果新的 i 节点是一个目录，初始化 . 和 .. 两个目录项
   if(type == T_DIR){  // Create . and .. entries.
     dp->nlink++;  // for ".."
     iupdate(dp);
@@ -283,6 +312,7 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+// 打开文件或目录
 int
 sys_open(void)
 {
@@ -333,6 +363,7 @@ sys_open(void)
   return fd;
 }
 
+// 创建一个目录
 int
 sys_mkdir(void)
 {
@@ -349,6 +380,7 @@ sys_mkdir(void)
   return 0;
 }
 
+// 创建新文件
 int
 sys_mknod(void)
 {
@@ -369,6 +401,7 @@ sys_mknod(void)
   return 0;
 }
 
+// 切换目录
 int
 sys_chdir(void)
 {
@@ -394,6 +427,7 @@ sys_chdir(void)
   return 0;
 }
 
+// 执行文件
 int
 sys_exec(void)
 {
@@ -420,6 +454,7 @@ sys_exec(void)
   return exec(path, argv);
 }
 
+// 创建管道文件
 int
 sys_pipe(void)
 {

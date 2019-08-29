@@ -1,13 +1,14 @@
+// 磁盘块结构
 struct buf {
-  int flags;
-  uint dev;
-  uint blockno;
+  int flags; // 标记磁盘状态，valid/dirty
+  uint dev; // 磁盘设备号
+  uint blockno; // 块编号
   struct sleeplock lock;
   uint refcnt;
-  struct buf *prev; // LRU cache list
-  struct buf *next;
-  struct buf *qnext; // disk queue
-  uchar data[BSIZE];
+  struct buf *prev; // LRU cache list 使用LRU替换
+  struct buf *next; // 链式结构连接磁盘块
+  struct buf *qnext; // 磁盘队列
+  uchar data[BSIZE]; // 块大小为512字节
 };
-#define B_VALID 0x2  // buffer has been read from disk
-#define B_DIRTY 0x4  // buffer needs to be written to disk
+#define B_VALID 0x2  // 缓冲区拥有磁盘块的有效内容
+#define B_DIRTY 0x4  // 缓冲区的内容已经被改变并且需要写回磁盘

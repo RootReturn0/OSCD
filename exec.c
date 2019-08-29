@@ -1,3 +1,6 @@
+// 只有一个exec接口，实质就是传入elf格式的可执行文件，
+// 装载到内存并分配内存页，argv是一个指针数组，用于携带参数。
+
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -21,6 +24,7 @@ exec(char *path, char **argv)
 
   begin_op();
 
+  // 判断文件是否存在
   if((ip = namei(path)) == 0){
     end_op();
     cprintf("exec: fail\n");
@@ -29,7 +33,7 @@ exec(char *path, char **argv)
   ilock(ip);
   pgdir = 0;
 
-  // Check ELF header
+  // Check ELF header 检查elf头是否合法
   if(readi(ip, (char*)&elf, 0, sizeof(elf)) != sizeof(elf))
     goto bad;
   if(elf.magic != ELF_MAGIC)
@@ -38,7 +42,7 @@ exec(char *path, char **argv)
   if((pgdir = setupkvm()) == 0)
     goto bad;
 
-  // Load program into memory.
+  // Load program into memory. 将程序加载到内存
   sz = 0;
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, (char*)&ph, off, sizeof(ph)) != sizeof(ph))
