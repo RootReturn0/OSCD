@@ -454,7 +454,7 @@ sys_exec(void)
   return exec(path, argv);
 }
 
-// 创建管道文件
+// 创建管道文件，通过管道对的方式把管道的实现和文件系统连接起来
 int
 sys_pipe(void)
 {
