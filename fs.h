@@ -61,7 +61,7 @@ struct dinode {
 
 #define DIRSIZ 14 // 目录大小
 
-// 文件或目录数据结构，目录本身是以文件的方式存储到磁盘上的，叫做目录文件
+// 目录数据结构，目录本身是以文件的方式存储到磁盘上的，叫做目录文件
 struct dirent {
   ushort inum; // i节点号
   char name[DIRSIZ]; // 目录名

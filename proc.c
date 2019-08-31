@@ -311,7 +311,7 @@ wait(void)
   }
 }
 
-//PAGEBREAK: 42
+// PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -319,6 +319,11 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+// 每个CPU在设置自己之后调用scheduler（）。
+// 调度器永远不会返回，而是循环。循环以下步骤：
+//    - 选择要运行的流程
+//    - swtch开始运行该过程
+//    - 最终该过程通过swtch将控制转移回调度程序。
 void
 scheduler(void)
 {
@@ -326,31 +331,34 @@ scheduler(void)
   struct cpu *c = mycpu();
   c->proc = 0;
   
+  // 不断循环，永不停止
   for(;;){
-    // Enable interrupts on this processor.
-    sti();
+    // 开中断，以允许I/O到达
+    sti();  
 
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
+    // 在进程表上不断循环，寻找进程并运行
+    acquire(&ptable.lock); // 请求进程表锁
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
+      if(p->state != RUNNABLE) // 进程不可运行，转到下一个进程
         continue;
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
+      // 切换到选定的进程
       c->proc = p;
-      switchuvm(p);
+      switchuvm(p); // 切换到该进程的页表
       p->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+      swtch(&(c->scheduler), p->context); // 切换到该进程运行
+      switchkvm(); // 当没有进程正在运行时，将页表寄存器切换到仅内核页表。
 
       // Process is done running for now.
       // It should have changed its p->state before coming back.
+      // 进程已结束运行，改变自身状态
       c->proc = 0;
     }
-    release(&ptable.lock);
+    release(&ptable.lock); // 释放进程表锁，防止其他CPU无法进行调度
 
   }
 }
@@ -362,33 +370,39 @@ scheduler(void)
 // be proc->intena and proc->ncli, but that would
 // break in the few places where a lock is held but
 // there's no process.
+// 进入调度器，且必须持有进程表锁并改变进程状态
 void
 sched(void)
 {
   int intena;
   struct proc *p = myproc();
 
+  // 未持有进程表锁，不应进入调度，引发内核错误
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
+  // 处于锁状态，不应进入调度，引发内核错误
   if(mycpu()->ncli != 1)
     panic("sched locks");
+  // 进程处于运行态，不应进入调度，引发内核错误
   if(p->state == RUNNING)
     panic("sched running");
+  // 开中断，不可执行mycpu()函数，不应进入调度，引发内核错误
   if(readeflags()&FL_IF)
     panic("sched interruptible");
-  intena = mycpu()->intena;
-  swtch(&p->context, mycpu()->scheduler);
-  mycpu()->intena = intena;
+  intena = mycpu()->intena; // 暂存状态
+  swtch(&p->context, mycpu()->scheduler); // 保存当前上下文，并切换到之前保存的调度器的上下文，进入调度器
+  mycpu()->intena = intena; // 恢复状态
 }
 
 // Give up the CPU for one scheduling round.
+// 放弃CPU进行一轮调度
 void
 yield(void)
 {
-  acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
-  sched();
-  release(&ptable.lock);
+  acquire(&ptable.lock);  //DOC: yieldlock 请求进程表锁
+  myproc()->state = RUNNABLE; // 切换进程状态
+  sched(); 
+  release(&ptable.lock); // 释放进程表锁
 }
 
 // A fork child's very first scheduling by scheduler()

@@ -47,15 +47,17 @@ binit(void)
 {
   struct buf *b;
 
+  // 初始化块缓冲锁
   initlock(&bcache.lock, "bcache");
 
 //PAGEBREAK!
-  // Create linked list of buffers
+  // 构建缓冲双向链表
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
     b->next = bcache.head.next;
     b->prev = &bcache.head;
+    // 初始化缓冲区中的块的锁
     initsleeplock(&b->lock, "buffer");
     bcache.head.next->prev = b;
     bcache.head.next = b;
@@ -67,26 +69,21 @@ binit(void)
 // In either case, return locked buffer.
 // 扫描缓冲区链表，通过给定的设备号和扇区号找到对应的缓冲区
 // 如果未找到，则分配一个缓冲区
-// 否则返回一个已锁的缓冲区
+// 否则返回一个持有锁的缓冲区
 static struct buf*
 bget(uint dev, uint blockno)
 {
   struct buf *b;
 
-  acquire(&bcache.lock); // 请求锁
+  acquire(&bcache.lock); // 请求块缓冲区锁
 
   // Is the block already cached?
-  // 如果存在这样一个缓冲区，并且它还不是处于 B_BUSY 状态，
-  // 就设置它的 B_BUSY 位并且返回。
-  // 如果找到的缓冲区已经在使用中，就睡眠等待它被释放。
-  // 当 sleep 返回的时候，并不能假设这块缓冲区现在可用了，
-  // 事实上，sleep 时释放了 buf_table_lock, 醒来后重新获取了它，
-  // 这就不能保证 b 仍然是可用的缓冲区：它有可能被用来缓冲另外一个扇区。
+  // 不能保证 b 仍然是可用的缓冲区：它有可能被用来缓冲另外一个块。
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++; // 引用计数加一
-      release(&bcache.lock); // 释放锁
-      acquiresleep(&b->lock); // 请求sleeplock
+      release(&bcache.lock); // 释放块缓冲区锁
+      acquiresleep(&b->lock); // 请求该块的锁
       return b;
     }
   }
@@ -107,18 +104,21 @@ bget(uint dev, uint blockno)
     }
   }
 
-  // 寻找和分配缓冲均失败，引发内核错误
+  // 未找到块且未能分配块，引发内核错误
   panic("bget: no buffers");
 }
 
 // Return a locked buf with the contents of the indicated block.
-// 调用 bget 获得指定扇区的缓冲区。如果缓冲区需要从磁盘中读出，bread 会在返回缓冲区前调用 iderw。
+// 调用 bget 获得指定的缓冲区。如果缓冲区需要从磁盘中读出，
+// bread 会在返回缓冲区前调用 iderw 以从ide磁盘中读取内容至缓冲区。
 struct buf*
 bread(uint dev, uint blockno)
 {
   struct buf *b;
 
+  // 获取缓冲区
   b = bget(dev, blockno);
+  // 如果缓冲区中不存在指定的块，则从磁盘中读出
   if((b->flags & B_VALID) == 0) {
     iderw(b);
   }
@@ -126,11 +126,11 @@ bread(uint dev, uint blockno)
 }
 
 // Write b's contents to disk.  Must be locked.
-// 设置 B_DIRTY 位并且调用的 iderw 将缓冲区的内容写到磁盘。
+// 设置 B_DIRTY 位并且调用 iderw 将缓冲区的内容写到磁盘。
 void
 bwrite(struct buf *b)
 {
-  // 缓冲区未持有sleeplock，无法写入，引发内核错误
+  // 该块未锁，可能已被释放，无法写入，引发内核错误
   if(!holdingsleep(&b->lock))
     panic("bwrite");
   b->flags |= B_DIRTY;
@@ -139,20 +139,20 @@ bwrite(struct buf *b)
 
 // Release a locked buffer.
 // Move to the head of the MRU list.
-// 将一块缓冲区移动到链表的头部，清除 B_BUSY，唤醒睡眠在这块缓冲区上的进程。
+// 唤醒睡眠在这块缓冲区上的进程；将一块缓冲区移动到链表的头部。
 void
 brelse(struct buf *b)
 {
-  // 缓冲区未持有sleeplock，引发内核错误
+  // 缓冲区未持有块锁，引发内核错误
   if(!holdingsleep(&b->lock))
     panic("brelse");
 
-  releasesleep(&b->lock); // 释放sleeplock
+  releasesleep(&b->lock); // 释放块锁
 
-  acquire(&bcache.lock); // 请求锁
+  acquire(&bcache.lock); // 请求  缓冲区锁
   b->refcnt--; //引用计数减一
   if (b->refcnt == 0) {
-    // no one is waiting for it.
+    // 无进程等待使用，移动到链表头部
     b->next->prev = b->prev;
     b->prev->next = b->next;
     b->next = bcache.head.next;
@@ -161,7 +161,7 @@ brelse(struct buf *b)
     bcache.head.next = b;
   }
   
-  release(&bcache.lock); //释放锁
+  release(&bcache.lock); //释放缓冲区锁
 }
 //PAGEBREAK!
 // Blank page.

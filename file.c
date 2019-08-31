@@ -22,7 +22,7 @@ fileinit(void)
   initlock(&ftable.lock, "ftable");
 }
 
-// Allocate a file structure.  分配一个文件结构
+// Allocate a file structure.  分配一个文件数据结构
 struct file*
 filealloc(void)
 {
